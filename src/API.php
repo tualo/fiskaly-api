@@ -48,52 +48,6 @@ class API
     }
 
     
-    public static function query(string $url, mixed $header, mixed $data, string $method = 'POST'): mixed
-    {
-        $ch = curl_init(self::replacer($url));
-        echo self::replacer($url);
-        echo "\n\n\n";
-        $header = self::replacer($header);
-        print_r($header);
-        echo "\n\n\n";
-        if (is_array($header)) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
-        }
-
-
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-        if ($method == 'PUT') {
-            $data = self::replacer($data);
-            $payload = json_encode($data);
-
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-            // curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Length: ' . strlen($payload)));
-
-            curl_setopt($ch, CURLOPT_PUT, true);
-        }
-        if ($method == 'POST') {
-            if (is_array($data) && count($data) > 0) {
-                $data = self::replacer($data);
-                $payload = json_encode($data);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-            }
-            curl_setopt($ch, CURLOPT_POST, true);
-        }
-
-
-        $result = curl_exec($ch);
-        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        echo "STATUS  $status\n\n\n";
-        curl_close($ch);
-        echo $result . "\n\n\n";
-        $json = json_decode($result, true);
-        if (isset($json['status_code']) && ($json['status_code'] != 200)) {
-            throw new \Exception($json['message']);
-        }
-        return $json;
-    }
 
     public static function getEnvironment(): array
     {
