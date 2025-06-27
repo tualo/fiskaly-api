@@ -10,13 +10,15 @@
     ],
     "require": {
         "guzzlehttp/guzzle": "*",
-        "ramsey/uuid":  "*"
+        "ramsey/uuid": "*"
     },
     "minimum-stability": "dev",
     "autoload": {
         "psr-4": {
             "Tualo\\Office\\FiskalyAPI\\": "src/"
         },
-        "files": ["src/functions.php"]
+        "files": [
+            "src/functions.php"
+        ]
     }
 }

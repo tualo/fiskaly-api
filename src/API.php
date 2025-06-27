@@ -2,6 +2,7 @@
 
 namespace Tualo\Office\FiskalyAPI;
 
+use Garden\Cli\Cli;
 use Tualo\Office\Basic\TualoApplication;
 use Ramsey\Uuid\Uuid;
 use GuzzleHttp\Client;
@@ -9,19 +10,54 @@ use GuzzleHttp\Client;
 class API
 {
 
+    private static $_db = null;
     private static $ENV = null;
     private static $TSS = null;
+    private static $type = 'test';
+
     private static $clientID = '5059fbe8-1b3b-11ee-a0f1-0cc47a979684';
+
+    public static function resetEnvrionment()
+    {
+
+        self::$_db = null;
+        self::$ENV = null;
+        self::$TSS = null;
+        self::$type = 'test';
+    }
+
+    public static function setLive($yes = true)
+    {
+        if ($yes) {
+            self::$type = 'live';
+        } else {
+            self::$type = 'test';
+        }
+    }
+
+    public static function db($db = null)
+    {
+        if (!is_null($db) && is_null(self::$_db)) {
+            self::$_db = $db;
+        }
+        if (is_null(self::$_db)) {
+            self::$_db = TualoApplication::get('session')->getDB();
+        }
+
+        return self::$_db;
+    }
 
     public static function addEnvrionment(string $id, string $val)
     {
         self::$ENV[$id] = $val;
-        $db = TualoApplication::get('session')->getDB();
+        $db = self::db();
         try {
             if (!is_null($db)) {
-                $db->direct('insert into fiskaly_environments (id,val) values ({id},{val}) on duplicate key update val=values(val)', [
+                $db->direct('insert into fiskaly_environments (id,val,type) values ({id},{val},{type}) 
+                    on duplicate key update val=values(val)', [
                     'id' => $id,
-                    'val' => $val
+                    'val' => $val,
+                    'type' => self::$type
                 ]);
             }
         } catch (\Exception $e) {
@@ -47,21 +83,29 @@ class API
         return $data;
     }
 
-    
+
 
     public static function getEnvironment(): array
     {
         if (is_null(self::$ENV)) {
-            $db = TualoApplication::get('session')->getDB();
+            $db = self::db();
             try {
                 if (!is_null($db)) {
-                    $data = $db->direct('select id,val from fiskaly_environments');
+                    $data = $db->direct('select id,val from fiskaly_environments where type={type}', [
+                        'type' => self::$type
+                    ]);
                     foreach ($data as $d) {
                         self::$ENV[$d['id']] = $d['val'];
                     }
+                } else {
+                    echo 'Error ';
                 }
             } catch (\Exception $e) {
+                echo 'Error fetching fiskaly environments: ' . $e->getMessage() . PHP_EOL;
             }
+        }
+        if (is_null(self::$ENV)) {
+            self::$ENV = [];
         }
         return self::$ENV;
     }
@@ -69,12 +113,13 @@ class API
     public static function getTss(): array
     {
         if (is_null(self::$TSS)) {
-            $db = TualoApplication::get('session')->getDB();
+            $db = self::db();
             try {
                 if (!is_null($db)) {
                     $data = $db->direct('select id,val from fiskaly_tss where tss={guid}', [
                         'guid' => self::env('guid')
                     ]);
+
                     foreach ($data as $d) {
                         self::$TSS[$d['id']] = $d['val'];
                     }
@@ -82,13 +127,19 @@ class API
             } catch (\Exception $e) {
             }
         }
+        if (is_null(self::$TSS)) {
+            self::$TSS = [];
+        }
         return self::$TSS;
     }
 
     public static function addTss(string $id, string $val)
     {
+        if (is_null(self::$TSS)) {
+            self::$TSS = self::getTss();
+        }
         self::$TSS[$id] = $val;
-        $db = TualoApplication::get('session')->getDB();
+        $db = self::db();
         try {
             if (!is_null($db)) {
                 $db->direct('insert into fiskaly_tss (tss,id,val) values ({guid},{id},{val}) on duplicate key update val=values(val)', [
@@ -98,7 +149,6 @@ class API
                 ]);
             }
         } catch (\Exception $e) {
-            
         }
     }
 
@@ -108,7 +158,7 @@ class API
         if (isset($env[$key])) {
             return $env[$key];
         }
-        throw new \Exception('TSS data ' . $key . ' not found!');
+        throw new \Exception('TSS data ' . $key . ' not found! ' . self::env('guid'));
     }
 
     public static function env($key)
@@ -135,9 +185,7 @@ class API
         }
     }
 
-    public static function changeToken()
-    {
-    }
+    public static function changeToken() {}
 
     public static function auth()
     {
@@ -184,8 +232,7 @@ class API
             ]
         );
         $response = $client->get('/api/v1/cash_registers', [
-            'json' => [
-            ]
+            'json' => []
         ]);
         $code = $response->getStatusCode(); // 200
         $reason = $response->getReasonPhrase(); // OK
@@ -210,8 +257,7 @@ class API
             ]
         );
         $response = $client->get('/api/v1/vat_definitions', [
-            'json' => [
-            ]
+            'json' => []
         ]);
         $code = $response->getStatusCode(); // 200
         $reason = $response->getReasonPhrase(); // OK
@@ -258,9 +304,10 @@ class API
         if (isset($result['certificate'])) {
             foreach ($result as $id => $val) {
                 self::addTss($id, (is_array($val) ? json_encode($val) : $val));
-                
             }
         }
+
+
 
 
         return $result;
@@ -298,7 +345,6 @@ class API
         if (isset($result['certificate'])) {
             foreach ($result as $id => $val) {
                 self::addTss($id, is_array($val) ? json_encode($val) : $val);
-                
             }
         }
         return $result;
@@ -337,7 +383,6 @@ class API
         if (isset($result['certificate'])) {
             foreach ($result as $id => $val) {
                 self::addTss($id, is_array($val) ? json_encode($val) : $val);
-                
             }
         }
         return $result;
@@ -356,8 +401,10 @@ class API
             ->singleValue(
                 'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
                 [
-                    'kassenterminal'=>$terminal_id
-                ],'tss_client_id');
+                    'kassenterminal' => $terminal_id
+                ],
+                'tss_client_id'
+            );
 
         $client = new Client(
             [
@@ -379,13 +426,12 @@ class API
         if (isset($result['certificate'])) {
             foreach ($result as $id => $val) {
                 self::addTss($id, is_array($val) ? json_encode($val) : $val);
-                
             }
         }
 
         $tss = $result;
 
-        $response = $client->get('/api/v2/tss/' . self::env('guid').'/client/'.self::$clientID);
+        $response = $client->get('/api/v2/tss/' . self::env('guid') . '/client/' . self::$clientID);
         $code = $response->getStatusCode(); // 200
         $reason = $response->getReasonPhrase(); // OK
 
@@ -396,12 +442,11 @@ class API
         if (isset($result['certificate'])) {
             foreach ($result as $id => $val) {
                 self::addTss($id, is_array($val) ? json_encode($val) : $val);
-                
             }
         }
         return [
-            'tss'=>$tss,
-            'client'=>$result
+            'tss' => $tss,
+            'client' => $result
         ];
     }
 
@@ -422,7 +467,8 @@ class API
                 ]
             ]
         );
-        $response = $client->patch('/api/v2/tss/' . self::env('guid').'/admin', [
+
+        $response = $client->patch('/api/v2/tss/' . self::env('guid') . '/admin', [
             'json' => [
                 'admin_puk' => self::tss('admin_puk'),
                 'new_admin_pin' => self::tss('admin_pin'),
@@ -457,7 +503,7 @@ class API
                 ]
             ]
         );
-        $response = $client->post('/api/v2/tss/' . self::env('guid').'/admin/auth', [
+        $response = $client->post('/api/v2/tss/' . self::env('guid') . '/admin/auth', [
             'json' => [
                 'admin_pin' => self::tss('admin_pin')
             ]
@@ -492,7 +538,7 @@ class API
                 ]
             ]
         );
-        $response = $client->post('/api/v2/tss/' . self::env('guid').'/admin/logout', [
+        $response = $client->post('/api/v2/tss/' . self::env('guid') . '/admin/logout', [
             'json' => [
                 'none' => 'none'
             ]
@@ -518,13 +564,15 @@ class API
         }
 
         self::$clientID = TualoApplication::get('session')
-        ->getDB()
-        ->singleValue(
-            'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
-            [
-                'kassenterminal'=>$terminal_id
-            ],'tss_client_id');
-            
+            ->getDB()
+            ->singleValue(
+                'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
+                [
+                    'kassenterminal' => $terminal_id
+                ],
+                'tss_client_id'
+            );
+
 
         $client = new Client(
             [
@@ -535,11 +583,11 @@ class API
                 ]
             ]
         );
-        $response = $client->put('/api/v2/tss/' . self::env('guid').'/client/'.self::$clientID, [
+        $response = $client->put('/api/v2/tss/' . self::env('guid') . '/client/' . self::$clientID, [
             'json' => [
                 'serial_number' => self::$clientID,
                 'metadata' => [
-                    'custom_field' => 'custom_value'
+                    'terminal_id' => $terminal_id
                 ]
             ]
         ]);
@@ -556,7 +604,7 @@ class API
     }
 
 
-    public static function transaction(string $terminal_id, array $rates,string $receipt_type='TRAINING' )
+    public static function transaction(string $terminal_id, array $rates, string $receipt_type = 'TRAINING')
     {
         self::precheck();
         if (!isset(self::$ENV['guid'])) {
@@ -564,12 +612,14 @@ class API
         }
 
         self::$clientID = TualoApplication::get('session')
-        ->getDB()
-        ->singleValue(
-            'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
-            [
-                'kassenterminal'=>$terminal_id
-            ],'tss_client_id');
+            ->getDB()
+            ->singleValue(
+                'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
+                [
+                    'kassenterminal' => $terminal_id
+                ],
+                'tss_client_id'
+            );
 
         $client = new Client(
             [
@@ -581,7 +631,7 @@ class API
             ]
         );
         $transactionID = (Uuid::uuid4())->toString();
-        $response = $client->put('/api/v2/tss/' . self::env('guid').'/tx/'.$transactionID.'?tx_revision=1', [
+        $response = $client->put('/api/v2/tss/' . self::env('guid') . '/tx/' . $transactionID . '?tx_revision=1', [
             'json' => [
                 'state' => 'ACTIVE',
                 'client_id' => self::$clientID
@@ -597,7 +647,7 @@ class API
 
 
 
-        $response = $client->put('/api/v2/tss/' . self::env('guid').'/tx/'.$transactionID.'?tx_revision=2', [
+        $response = $client->put('/api/v2/tss/' . self::env('guid') . '/tx/' . $transactionID . '?tx_revision=2', [
             'json' => [
                 'state' => 'FINISHED',
                 'client_id' => self::$clientID,
@@ -625,6 +675,68 @@ class API
         }
         $finish_result = json_decode($response->getBody()->getContents(), true);
 
-        return $finish_result;
+        return [$start_result, $finish_result];
+    }
+
+
+    public static function getClient(string $terminal_id): Client
+    {
+        self::precheck();
+        if (!isset(self::$ENV['guid'])) {
+            self::addEnvrionment('guid', (Uuid::uuid4())->toString());
+        }
+
+        self::$clientID = TualoApplication::get('session')
+            ->getDB()
+            ->singleValue(
+                'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
+                [
+                    'kassenterminal' => $terminal_id
+                ],
+                'tss_client_id'
+            );
+
+        $client = new Client(
+            [
+                'base_uri' => self::env('sign_base_url'),
+                'timeout'  => 2.0,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . self::env('access_token')
+                ]
+            ]
+        );
+        return $client;
+    }
+
+
+    public static function rawTransaction(string $terminal_id, string $transactionID, string $processType, string $processData, string $state = 'FINISHED', int $revision = 1)
+    {
+        if (!in_array($state, ['ACTIVE', 'CANCELLED', 'FINISHED'])) {
+            throw new \Exception('Invalid state: ' . $state);
+        }
+
+        $client = self::getClient($terminal_id);
+
+        $response = $client->put('/api/v2/tss/' . self::env('guid') . '/tx/' . $transactionID . '?tx_revision=' . $revision, [
+            'json' => [
+                'state' => $state,
+                'client_id' => self::$clientID,
+                'schema' => [
+                    'raw' => [
+                        'process_type' => $processType,
+                        'process_data' => $processData
+                    ]
+                ]
+            ]
+        ]);
+        $code = $response->getStatusCode(); // 200
+        $reason = $response->getReasonPhrase(); // OK
+
+        if ($code != 200) {
+            throw new \Exception($reason);
+        }
+        $_result = json_decode($response->getBody()->getContents(), true);
+
+        return $_result;
     }
 }
