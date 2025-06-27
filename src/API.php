@@ -269,7 +269,7 @@ class API
         return $result;
     }
 
-    public static function createTSS()
+    public static function createTSS(string $system = 'tualo')
     {
         self::precheck();
         if (!isset(self::$ENV['guid'])) {
@@ -289,7 +289,7 @@ class API
         $response = $client->put('/api/v2/tss/' . self::env('guid'), [
             'json' => [
                 'metadata' => [
-                    'custom_field' => 'custom_value'
+                    'system' => $system
                 ]
             ]
         ]);
