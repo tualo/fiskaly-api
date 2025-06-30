@@ -189,20 +189,52 @@ class API
 
     public static function auth()
     {
+        if (self::isExpired(3000)) {
 
 
+            $client = new Client(
+                [
+                    'base_uri' => self::env('sign_base_url'),
+                    'timeout'  => 2.0,
+                ]
+            );
+            $response = $client->post('/api/v2/auth', [
+                'json' => [
+                    'api_key' => self::env('api_key'),
+                    'api_secret' => self::env('api_secret')
+                ]
+            ]);
+            $code = $response->getStatusCode(); // 200
+            $reason = $response->getReasonPhrase(); // OK
+
+            if ($code != 200) {
+                throw new \Exception($reason);
+            }
+            $result = json_decode($response->getBody()->getContents(), true);
+            if (isset($result['access_token'])) {
+                self::addEnvrionment('access_token', $result['access_token']);
+                self::addEnvrionment('access_token_expires_at', $result['access_token_expires_at']);
+
+                self::addEnvrionment('refresh_token', $result['refresh_token']);
+                self::addEnvrionment('refresh_token_expires_at', $result['refresh_token_expires_at']);
+            }
+            return $result;
+        }
+    }
+
+
+    public static function clients()
+    {
         $client = new Client(
             [
                 'base_uri' => self::env('sign_base_url'),
                 'timeout'  => 2.0,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . self::env('access_token')
+                ]
             ]
         );
-        $response = $client->post('/api/v2/auth', [
-            'json' => [
-                'api_key' => self::env('api_key'),
-                'api_secret' => self::env('api_secret')
-            ]
-        ]);
+        $response = $client->get('/api/v2/tss/' . self::env('guid') . '/client', []);
         $code = $response->getStatusCode(); // 200
         $reason = $response->getReasonPhrase(); // OK
 
@@ -210,13 +242,28 @@ class API
             throw new \Exception($reason);
         }
         $result = json_decode($response->getBody()->getContents(), true);
-        if (isset($result['access_token'])) {
-            self::addEnvrionment('access_token', $result['access_token']);
-            self::addEnvrionment('access_token_expires_at', $result['access_token_expires_at']);
+        return $result;
+    }
 
-            self::addEnvrionment('refresh_token', $result['refresh_token']);
-            self::addEnvrionment('refresh_token_expires_at', $result['refresh_token_expires_at']);
+    public static function clientTransactions(string $client_id)
+    {
+        $client = new Client(
+            [
+                'base_uri' => self::env('sign_base_url'),
+                'timeout'  => 2.0,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . self::env('access_token')
+                ]
+            ]
+        );
+        $response = $client->get('/api/v2/tss/' . self::env('guid') . '/client/' . $client_id . '/tx', []);
+        $code = $response->getStatusCode(); // 200
+        $reason = $response->getReasonPhrase(); // OK
+
+        if ($code != 200) {
+            throw new \Exception($reason);
         }
+        $result = json_decode($response->getBody()->getContents(), true);
         return $result;
     }
 
@@ -388,6 +435,29 @@ class API
         return $result;
     }
 
+    public static function isExpired(int $seconds = 60): bool
+    {
+        $v = self::db()->singleValue(
+            '
+            select  
+                count(*) x 
+            from 
+                fiskaly_environments 
+            where 
+                    id={id} 
+                and type={type}
+                and (val - {seconds}) < UNIX_TIMESTAMP() 
+            ',
+            [
+                'type' => self::$type,
+                'id' => 'access_token_expires_at',
+                'seconds' => $seconds
+            ],
+            'x'
+        );
+
+        return $v > 0;
+    }
 
     public static function getTSSInformation(string $terminal_id)
     {
@@ -396,8 +466,7 @@ class API
             throw new \Exception('TSS not initialized');
         }
 
-        self::$clientID = TualoApplication::get('session')
-            ->getDB()
+        self::$clientID = self::db()
             ->singleValue(
                 'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
                 [
