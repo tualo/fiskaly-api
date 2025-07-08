@@ -6,6 +6,32 @@ use Garden\Cli\Cli;
 use Tualo\Office\Basic\TualoApplication;
 use Ramsey\Uuid\Uuid;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Exception\ServerException;
+
+
+class ApiException extends \Exception
+{
+    private int $responseCode = 0;
+    /**
+     * @param string $message
+     * @param int $code
+     * @param \Throwable|null $previous
+     */
+    public function __construct($message = "", $code = 0, \Throwable|null $previous = null)
+    {
+        parent::__construct($message, $code, $previous);
+        if ($previous instanceof ClientException || $previous instanceof ServerException) {
+            $this->responseCode = $previous->getResponse()->getStatusCode();
+        } else if ($previous instanceof \GuzzleHttp\Exception\RequestException) {
+            $this->responseCode = $previous->getResponse()->getStatusCode();
+        }
+    }
+    public function getResponseCode(): int
+    {
+        return $this->responseCode;
+    }
+}
 
 class API
 {
@@ -14,6 +40,7 @@ class API
     private static $ENV = null;
     private static $TSS = null;
     private static $type = 'test';
+
 
     private static $clientID = '5059fbe8-1b3b-11ee-a0f1-0cc47a979684';
 
@@ -26,7 +53,7 @@ class API
         self::$type = 'test';
     }
 
-    public static function setLive($yes = true)
+    private static function setLive($yes = true)
     {
         if ($yes) {
             self::$type = 'live';
@@ -91,6 +118,14 @@ class API
             $db = self::db();
             try {
                 if (!is_null($db)) {
+
+
+                    $type = $db->singleValue('select id,val from fiskaly_state where id="type"', [], 'val');
+                    if (is_null($type)) {
+                        $type = 'test';
+                    }
+                    self::setLive($type == 'live');
+
                     $data = $db->direct('select id,val from fiskaly_environments where type={type}', [
                         'type' => self::$type
                     ]);
@@ -462,61 +497,68 @@ class API
     public static function getTSSInformation(string $terminal_id)
     {
         self::precheck();
-        if (!isset(self::$ENV['guid'])) {
-            throw new \Exception('TSS not initialized');
-        }
 
-        self::$clientID = self::db()
-            ->singleValue(
-                'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
+        try {
+            if (!isset(self::$ENV['guid'])) {
+                throw new \Exception('TSS not initialized');
+            }
+
+            self::$clientID = self::db()
+                ->singleValue(
+                    'select tss_client_id from kassenterminals_client_id where  kassenterminal={kassenterminal}',
+                    [
+                        'kassenterminal' => $terminal_id
+                    ],
+                    'tss_client_id'
+                );
+
+
+            $client = new Client(
                 [
-                    'kassenterminal' => $terminal_id
-                ],
-                'tss_client_id'
+                    'base_uri' => self::env('sign_base_url'),
+                    'timeout'  => 60.0,
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . self::env('access_token')
+                    ]
+                ]
             );
 
-        $client = new Client(
-            [
-                'base_uri' => self::env('sign_base_url'),
-                'timeout'  => 60.0,
-                'headers' => [
-                    'Authorization' => 'Bearer ' . self::env('access_token')
-                ]
-            ]
-        );
-        $response = $client->get('/api/v2/tss/' . self::env('guid'));
-        $code = $response->getStatusCode(); // 200
-        $reason = $response->getReasonPhrase(); // OK
+            $response = $client->get('/api/v2/tss/' . self::env('guid'));
+            $code = $response->getStatusCode(); // 200
+            $reason = $response->getReasonPhrase(); // OK
 
-        if ($code != 200) {
-            throw new \Exception($reason);
-        }
-        $result = json_decode($response->getBody()->getContents(), true);
-        if (isset($result['certificate'])) {
-            foreach ($result as $id => $val) {
-                self::addTss($id, is_array($val) ? json_encode($val) : $val);
+            if ($code != 200) {
+                throw new \Exception($reason);
             }
-        }
-
-        $tss = $result;
-
-        $response = $client->get('/api/v2/tss/' . self::env('guid') . '/client/' . self::$clientID);
-        $code = $response->getStatusCode(); // 200
-        $reason = $response->getReasonPhrase(); // OK
-
-        if ($code != 200) {
-            throw new \Exception($reason);
-        }
-        $result = json_decode($response->getBody()->getContents(), true);
-        if (isset($result['certificate'])) {
-            foreach ($result as $id => $val) {
-                self::addTss($id, is_array($val) ? json_encode($val) : $val);
+            $result = json_decode($response->getBody()->getContents(), true);
+            if (isset($result['certificate'])) {
+                foreach ($result as $id => $val) {
+                    self::addTss($id, is_array($val) ? json_encode($val) : $val);
+                }
             }
+
+            $tss = $result;
+
+            $response = $client->get('/api/v2/tss/' . self::env('guid') . '/client/' . self::$clientID);
+            $code = $response->getStatusCode(); // 200
+            $reason = $response->getReasonPhrase(); // OK
+
+            if ($code != 200) {
+                throw new \Exception($reason);
+            }
+            $result = json_decode($response->getBody()->getContents(), true);
+            if (isset($result['certificate'])) {
+                foreach ($result as $id => $val) {
+                    self::addTss($id, is_array($val) ? json_encode($val) : $val);
+                }
+            }
+            return [
+                'tss' => $tss,
+                'client' => $result
+            ];
+        } catch (ClientException $e) {
+            throw new ApiException('Client Exception: ' . $e->getMessage(), $e->getCode(), $e);
         }
-        return [
-            'tss' => $tss,
-            'client' => $result
-        ];
     }
 
     public static function adminPin()
@@ -642,6 +684,30 @@ class API
                 'tss_client_id'
             );
 
+        if (self::$clientID == false || is_null(self::$clientID)) {
+            self::$clientID = (Uuid::uuid4())->toString();
+            // kassenterminals anlegen
+
+
+            $db = TualoApplication::get('session')->getDB();
+            $db->direct(
+                'insert into kassenterminals (id, name, kasse,lager,beleg) values ({kassenterminal}, {name}, {kasse},{lager},{beleg} )  ',
+                [
+                    'kassenterminal' => $terminal_id,
+                    'name' => 'Kassenterminal ' . $terminal_id,
+                    'kasse' => $db->singleValue('select min(id) x from hauptkassenbuecher', [], 'x') ?: 1,
+                    'lager' => $db->singleValue('select min(id) x from lager', [], 'x') ?: 1,
+                    'beleg' => $db->singleValue('select min(id) x from blg_config', [], 'x') ?: 1
+                ]
+            );
+            $db->direct(
+                'insert into kassenterminals_client_id (kassenterminal,tss_client_id) values ({kassenterminal},{tss_client_id}) on duplicate key update tss_client_id=values(tss_client_id)',
+                [
+                    'kassenterminal' => $terminal_id,
+                    'tss_client_id' => self::$clientID
+                ]
+            );
+        }
 
         $client = new Client(
             [
