@@ -60,6 +60,7 @@ class API
         } else {
             self::$type = 'test';
         }
+        self::$type = 'test';
     }
 
     public static function db($db = null)
@@ -246,6 +247,7 @@ class API
                 throw new \Exception($reason);
             }
             $result = json_decode($response->getBody()->getContents(), true);
+
             if (isset($result['access_token'])) {
                 self::addEnvrionment('access_token', $result['access_token']);
                 self::addEnvrionment('access_token_expires_at', $result['access_token_expires_at']);
@@ -472,6 +474,28 @@ class API
 
     public static function isExpired(int $seconds = 60): bool
     {
+
+        $not_set = self::db()->singleValue(
+            '
+            select  
+                count(*) x 
+            from 
+                fiskaly_environments 
+            where 
+                    id={id} 
+                and type={type}
+            ',
+            [
+                'type' => self::$type,
+                'id' => 'access_token_expires_at'
+            ],
+            'x'
+        ) == 0;
+
+        if ($not_set) {
+            return true;
+        }
+
         $v = self::db()->singleValue(
             '
             select  
@@ -491,6 +515,8 @@ class API
             'x'
         );
 
+
+
         return $v > 0;
     }
 
@@ -502,6 +528,7 @@ class API
             if (!isset(self::$ENV['guid'])) {
                 throw new \Exception('TSS not initialized');
             }
+
 
             self::$clientID = self::db()
                 ->singleValue(
@@ -585,6 +612,7 @@ class API
                 'new_admin_pin' => self::tss('admin_pin'),
             ]
         ]);
+        echo 'Admin PIN set' . PHP_EOL;
         $code = $response->getStatusCode(); // 200
         $reason = $response->getReasonPhrase(); // OK
 
