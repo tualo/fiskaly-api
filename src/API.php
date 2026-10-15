@@ -94,7 +94,7 @@ class API
 
 
 
-    public static function replacer($data)
+    public static function replacer(array $data): array
     {
         if (is_array($data)) {
             foreach ($data as $key => $value) {
